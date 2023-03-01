@@ -1,3 +1,4 @@
+// function useAsync(asyncCallback, initialState, dependencies) {/* code in here */}
 // useCallback: custom hooks
 // http://localhost:3000/isolated/exercise/02.js
 
@@ -10,20 +11,32 @@ import {
   PokemonErrorBoundary,
 } from '../pokemon'
 
-// 🐨 this is going to be our generic asyncReducer
+function useSafeDispatch(dispatch) {
+  const ref = React.useRef(false)
+  React.useEffect(() => {
+    ref.current = true
+    return () => {
+      ref.current = false
+    }
+  })
+  return React.useCallback((...args) => {
+    if (ref.current) dispatch(...args)
+  }, [])
+}
+
 function pokemonInfoReducer(state, action) {
   switch (action.type) {
     case 'pending': {
       // 🐨 replace "pokemon" with "data"
-      return {status: 'pending', pokemon: null, error: null}
+      return {status: 'pending', data: null, error: null}
     }
     case 'resolved': {
       // 🐨 replace "pokemon" with "data" (in the action too!)
-      return {status: 'resolved', pokemon: action.pokemon, error: null}
+      return {status: 'resolved', data: action.data, error: null}
     }
     case 'rejected': {
       // 🐨 replace "pokemon" with "data"
-      return {status: 'rejected', pokemon: null, error: action.error}
+      return {status: 'rejected', data: null, error: action.error}
     }
     default: {
       throw new Error(`Unhandled action type: ${action.type}`)
@@ -31,56 +44,52 @@ function pokemonInfoReducer(state, action) {
   }
 }
 
-function PokemonInfo({pokemonName}) {
-  // 🐨 move all the code between the lines into a new useAsync function.
-  // 💰 look below to see how the useAsync hook is supposed to be called
-  // 💰 If you want some help, here's the function signature (or delete this
-  // comment really quick if you don't want the spoiler)!
-  // function useAsync(asyncCallback, initialState, dependencies) {/* code in here */}
-
-  // -------------------------- start --------------------------
-
-  const [state, dispatch] = React.useReducer(pokemonInfoReducer, {
-    status: pokemonName ? 'pending' : 'idle',
-    // 🐨 this will need to be "data" instead of "pokemon"
-    pokemon: null,
+function useAsync(defaultValue) {
+  const [state, unsafeDispatch] = React.useReducer(pokemonInfoReducer, {
+    status: 'idle',
+    data: null,
     error: null,
+    ...defaultValue,
   })
+  const dispatch = useSafeDispatch(unsafeDispatch)
 
+  const func = React.useCallback(
+    function () {
+      if (!arguments.length) return
+      if (!arguments[0]) {
+        return
+      }
+      dispatch({type: 'pending'})
+      arguments[0].then(
+        data => {
+          dispatch({type: 'resolved', data})
+        },
+        error => {
+          dispatch({type: 'rejected', error})
+        },
+      )
+    },
+    [dispatch],
+  )
+  return [state, func]
+}
+
+function PokemonInfo({pokemonName}) {
+  const [state, func] = useAsync({
+    status: 'idle',
+  })
+  const ref = React.useRef(null)
+  const {data, status, error} = state
   React.useEffect(() => {
-    // 💰 this first early-exit bit is a little tricky, so let me give you a hint:
-    // const promise = asyncCallback()
-    // if (!promise) {
-    //   return
-    // }
-    // then you can dispatch and handle the promise etc...
-    if (!pokemonName) {
-      return
+    if (!pokemonName) return
+    ref.current = setTimeout(() => {
+      const promise = fetchPokemon(pokemonName)
+      func(promise)
+    })
+    return () => {
+      clearTimeout(ref.current)
     }
-    dispatch({type: 'pending'})
-    fetchPokemon(pokemonName).then(
-      pokemon => {
-        dispatch({type: 'resolved', pokemon})
-      },
-      error => {
-        dispatch({type: 'rejected', error})
-      },
-    )
-    // 🐨 you'll accept dependencies as an array and pass that here.
-    // 🐨 because of limitations with ESLint, you'll need to ignore
-    // the react-hooks/exhaustive-deps rule. We'll fix this in an extra credit.
-  }, [pokemonName])
-  // --------------------------- end ---------------------------
-
-  // 🐨 here's how you'll use the new useAsync hook you're writing:
-  // const state = useAsync(() => {
-  //   if (!pokemonName) {
-  //     return
-  //   }
-  //   return fetchPokemon(pokemonName)
-  // }, {/* initial state */}, [pokemonName])
-  // 🐨 this will change from "pokemon" to "data"
-  const {pokemon, status, error} = state
+  }, [func, pokemonName])
 
   switch (status) {
     case 'idle':
@@ -90,7 +99,7 @@ function PokemonInfo({pokemonName}) {
     case 'rejected':
       throw error
     case 'resolved':
-      return <PokemonDataView pokemon={pokemon} />
+      return <PokemonDataView pokemon={data} />
     default:
       throw new Error('This should be impossible')
   }
